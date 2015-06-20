@@ -1055,6 +1055,10 @@ private:
     process::Future<process::http::Response> redirect(
         const process::http::Request& request) const;
 
+    // /master/reserve
+    process::Future<process::http::Response> reserve(
+        const process::http::Request& request) const;
+
     // /master/roles.json
     process::Future<process::http::Response> roles(
         const process::http::Request& request) const;

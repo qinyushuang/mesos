@@ -139,6 +139,10 @@ public:
       const SlaveID& slaveId,
       const std::vector<Offer::Operation>& operations);
 
+  void updateAvailable(
+      const SlaveID& slaveId,
+      const std::vector<Offer::Operation>& operations);
+
   void recoverResources(
       const FrameworkID& frameworkId,
       const SlaveID& slaveId,
@@ -706,6 +710,34 @@ HierarchicalAllocatorProcess<RoleSorter, FrameworkSorter>::updateAllocation(
   LOG(INFO) << "Updated allocation of framework " << frameworkId
             << " on slave " << slaveId
             << " from " << allocation << " to " << updatedAllocation.get();
+}
+
+
+template <class RoleSorter, class FrameworkSorter>
+void
+HierarchicalAllocatorProcess<RoleSorter, FrameworkSorter>::updateAvailable(
+    const SlaveID& slaveId,
+    const std::vector<Offer::Operation>& operations)
+{
+  CHECK(initialized);
+  CHECK(slaves.contains(slaveId));
+
+  // Update the available resources.
+  Try<Resources> updatedAvailable = slaves[slaveId].available.apply(operations);
+  CHECK_SOME(updatedAvailable);
+
+  slaves[slaveId].available = updatedAvailable.get();
+
+  // Update the total resources.
+  Try<Resources> updatedTotal = slaves[slaveId].total.apply(operations);
+  CHECK_SOME(updatedTotal);
+
+  slaves[slaveId].total = updatedTotal.get();
+
+  // Now, update the total resources in the role sorter.
+  roleSorter->update(
+      slaveId,
+      slaves[slaveId].total.unreserved());
 }
 
 

@@ -1522,6 +1522,7 @@ mesos_tests_SOURCES =				\
   tests/registrar_tests.cpp			\
   tests/repair_tests.cpp			\
   tests/reservation_tests.cpp			\
+  tests/reserve_tests.cpp			\
   tests/resource_offers_tests.cpp		\
   tests/resources_tests.cpp			\
   tests/scheduler_tests.cpp			\

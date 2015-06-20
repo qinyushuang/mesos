@@ -41,6 +41,7 @@
 #include <stout/os.hpp>
 #include <stout/result.hpp>
 #include <stout/strings.hpp>
+#include <stout/utils.hpp>
 
 #include "authorizer/authorizer.hpp"
 
@@ -52,6 +53,7 @@
 #include "logging/logging.hpp"
 
 #include "master/master.hpp"
+#include "master/validation.hpp"
 
 #include "mesos/mesos.hpp"
 #include "mesos/resources.hpp"
@@ -67,6 +69,7 @@ using process::http::BadRequest;
 using process::http::InternalServerError;
 using process::http::NotFound;
 using process::http::OK;
+using process::http::PreconditionFailed;
 using process::http::TemporaryRedirect;
 using process::http::Unauthorized;
 
@@ -435,6 +438,136 @@ Future<Response> Master::Http::redirect(const Request& request) const
 
   return TemporaryRedirect(
       "http://" + hostname.get() + ":" + stringify(info.port()));
+}
+
+
+Future<Response> Master::Http::reserve(const Request& request) const
+{
+  if (request.method != "POST") {
+    return BadRequest("Expecting POST");
+  }
+
+  // Parse the query string in the request body.
+  Try<hashmap<string, string>> decode =
+    process::http::query::decode(request.body);
+
+  if (decode.isError()) {
+    return BadRequest("Unable to decode query string: " + decode.error());
+  }
+
+  const hashmap<string, string>& values = decode.get();
+
+  if (values.get("slaveId").isNone()) {
+    return BadRequest("Missing 'slaveId' query parameter");
+  }
+
+  SlaveID slaveId;
+  slaveId.set_value(values.get("slaveId").get());
+
+  Slave* slave = master->slaves.registered.get(slaveId);
+  if (slave == NULL) {
+    return BadRequest("No slave found with specified ID");
+  }
+
+  if (values.get("resources").isNone()) {
+    return BadRequest("Missing 'resources' query parameter");
+  }
+
+  Try<JSON::Array> parse =
+    JSON::parse<JSON::Array>(values.get("resources").get());
+
+  if (parse.isError()) {
+    return BadRequest(
+        "Error in parsing 'resources' query parameter: " + parse.error());
+  }
+
+  const JSON::Array& array = parse.get();
+
+  Resources resources;
+  foreach (const JSON::Value& value, array.values) {
+    Try<Resource> resource = ::protobuf::parse<Resource>(value);
+    if (resource.isError()) {
+      return BadRequest(
+          "Error in parsing 'resources' query parameter: " + resource.error());
+    }
+    resources += resource.get();
+  }
+
+  Result<Credential> credential = authenticate(request);
+
+  if (credential.isError()) {
+    return Unauthorized("Mesos master", credential.error());
+  }
+
+  // TODO(mpark): Add a reserve ACL for authorization.
+
+  // Create an offer operation.
+  Offer::Operation operation;
+  operation.set_type(Offer::Operation::RESERVE);
+  operation.mutable_reserve()->mutable_resources()->CopyFrom(resources);
+
+  Option<string> principal =
+    credential.isSome() ? credential.get().principal() : Option<string>::none();
+
+  Option<Error> validate =
+    validation::operation::validate(operation.reserve(), None(), principal);
+
+  if (validate.isSome()) {
+    return BadRequest("Invalid RESERVE operation: " + validate.get().message);
+  }
+
+  Resources unusedResources =
+    slave->totalResources - Resources::sum(slave->usedResources);
+
+  // We check here whether the request can be satisfied at all.
+  // If applying the operation on unused resources is successful,
+  // we know that we can satisfy the request with the current
+  // available resources, or by rescinding outstanding offers.
+  Try<Resources> apply = unusedResources.apply(operation);
+  if (apply.isError()) {
+    return PreconditionFailed(apply.error());
+  }
+
+  // Performs 'master->applyOfferOperation' if the operation can be
+  // satisfied with the available resources. Returns true if it
+  // performed the offer operation, otherwise false.
+  auto applyOfferOperation = [=](const Resources& offeredResources) {
+    Resources availableResources = unusedResources - offeredResources;
+
+    Try<Resources> apply = availableResources.apply(operation);
+    if (apply.isError()) {
+      return false;
+    }
+
+    master->applyOfferOperation(NULL, slave, operation);
+    return true;
+  };
+
+  // Try to apply the operation with current available resources.
+  if (applyOfferOperation(slave->offeredResources)) {
+    return OK();
+  }
+
+  // If our current available resources weren't sufficient to satisfy
+  // the operation, we try to apply the operation each time after
+  // recinding offers one by one.
+  foreach (Offer* offer, utils::copy(slave->offers)) {
+    master->allocator->recoverResources(
+        offer->framework_id(), offer->slave_id(), offer->resources(), None());
+
+    master->removeOffer(offer, true);  // Rescind!
+
+    // Recinding the offer decreases 'slave->offeredResources' which
+    // in turn increases the available resources. We try to apply the
+    // operation again with the new available resources.
+    if (applyOfferOperation(slave->offeredResources)) {
+      return OK();
+    }
+  }
+
+  // We should never get here. If we do, we have a bug!
+  return InternalServerError(
+      "Failed to reserve resources even after rescinding all offers.");
 }
 
 

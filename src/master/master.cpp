@@ -746,6 +746,11 @@ void Master::initialize()
         [http](const process::http::Request& request) {
           return http.redirect(request);
         });
+  route("/reserve",
+        None(),  // TODO(mpark): Add an Http::RESERVE_HELP,
+        [http](const process::http::Request& request) {
+          return http.reserve(request);
+        });
   route("/roles.json",
         Http::ROLES_HELP,
         [http](const process::http::Request& request) {
@@ -5090,13 +5095,13 @@ void Master::applyOfferOperation(
     Slave* slave,
     const Offer::Operation& operation)
 {
-  CHECK_NOTNULL(framework);
   CHECK_NOTNULL(slave);
 
-  allocator->updateAllocation(
-      framework->id(),
-      slave->id,
-      {operation});
+  if (framework == NULL) {
+    allocator->updateAvailable(slave->id, {operation});
+  } else {
+    allocator->updateAllocation(framework->id(), slave->id, {operation});
+  }
 
   slave->apply(operation);
 

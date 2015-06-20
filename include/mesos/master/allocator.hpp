@@ -128,6 +128,10 @@ public:
       const SlaveID& slaveId,
       const std::vector<Offer::Operation>& operations) = 0;
 
+  virtual void updateAvailable(
+      const SlaveID& slaveId,
+      const std::vector<Offer::Operation>& operations) = 0;
+
   // Informs the Allocator to recover resources that are considered
   // used by the framework.
   virtual void recoverResources(

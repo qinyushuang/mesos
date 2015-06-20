@@ -102,6 +102,10 @@ public:
       const SlaveID& slaveId,
       const std::vector<Offer::Operation>& operations);
 
+  void updateAvailable(
+      const SlaveID& slaveId,
+      const std::vector<Offer::Operation>& operations);
+
   void recoverResources(
       const FrameworkID& frameworkId,
       const SlaveID& slaveId,
@@ -185,6 +189,10 @@ public:
 
   virtual void updateAllocation(
       const FrameworkID& frameworkId,
+      const SlaveID& slaveId,
+      const std::vector<Offer::Operation>& operations) = 0;
+
+  virtual void updateAvailable(
       const SlaveID& slaveId,
       const std::vector<Offer::Operation>& operations) = 0;
 
@@ -400,6 +408,19 @@ inline void MesosAllocator<AllocatorProcess>::updateAllocation(
       process,
       &MesosAllocatorProcess::updateAllocation,
       frameworkId,
+      slaveId,
+      operations);
+}
+
+
+template <typename AllocatorProcess>
+inline void MesosAllocator<AllocatorProcess>::updateAvailable(
+    const SlaveID& slaveId,
+    const std::vector<Offer::Operation>& operations)
+{
+  process::dispatch(
+      process,
+      &MesosAllocatorProcess::updateAvailable,
       slaveId,
       operations);
 }
