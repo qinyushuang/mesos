@@ -438,6 +438,20 @@ struct NotFound : Response
 };
 
 
+struct PreconditionFailed : Response
+{
+  PreconditionFailed()
+  {
+    status = "412 Precondition Failed";
+  }
+
+  explicit PreconditionFailed(const std::string& body) : Response(body)
+  {
+    status = "412 Precondition Failed";
+  }
+};
+
+
 struct InternalServerError : Response
 {
   InternalServerError()
